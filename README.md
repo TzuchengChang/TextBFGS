@@ -1,5 +1,4 @@
-TextBFGS Supplementary Material
-===============================
+# TextBFGS: Quasi-Newton Optimization for Discrete Executable Text via Gradient-Operator Retrieval
 
 This folder contains the anonymized supplementary material for the TextBFGS
 experiments described in the paper. All company-specific identifiers, private
@@ -53,7 +52,7 @@ The scripts require the following parameters (all are mandatory):
 - `--embedding-api-model`: embedding model name (default: `Qwen3-Embedding-8B`)
 
 You can use any large language model that supports:
-- chat-style prompts (`messages = [{\"role\": \"system\"|\"user\", ...}]`),
+- chat-style prompts (`messages = [{"role": "system"|"user", ...}]`),
 - streaming responses with `data: ...` JSON lines containing
   `choices[0].delta.content`.
 
