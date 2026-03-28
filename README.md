@@ -1,65 +1,86 @@
-# TextBFGS: Quasi-Newton Optimization for Discrete Executable Text via Gradient-Operator Retrieval
+# TextBFGS: A Case-Based Reasoning Approach to Code Optimization via Error-Operator Retrieval
 
-This folder contains the anonymized supplementary material for the TextBFGS
-experiments described in the paper. All company-specific identifiers, private
-URLs, and API keys have been removed or replaced with generic placeholders.
+Official implementation accompanying *TextBFGS* (ICCBR 2026, LNCS). Canonical repo: [github.com/TzuchengChang/TextBFGS](https://github.com/TzuchengChang/TextBFGS).
 
-Directory layout
-----------------
+## Overview
 
-- `code/`
-  - `client.py`: minimal Qwen-compatible client used in the runs. You must
-    provide your own `api_key` and `base_url` to actually send requests.
-  - `optimizer/`: snapshot of the T-BFGS optimizer and the associated
-    Hessian-Proxy Knowledge Base (HPKB) implementation and prompts.
-- `examples/`
-  - `humaneval_textbfgs.py`: end-to-end script that runs TextBFGS on
-    HumanEval/HumanEval+ using EvalPlus.
-  - `mbpp_textbfgs.py`: end-to-end script that runs TextBFGS on MBPP/MBPP+.
-- `data/`
-  - `README.md`: overview of the benchmarks and how to generate hard subsets.
-  - `generate_humaneval_hard.py`: script to generate HumanEval-Hard (tasks
-    where the initial model solution fails HumanEval base or plus tests).
-  - `generate_mbpp_hard.py`: script to generate MBPP-Hard (tasks where the
-    initial model solution fails MBPP base or plus tests).
-  - `humaneval-hard/`: output directory for HumanEval-Hard JSONL files.
-  - `mbpp-hard/`: output directory for MBPP-hard JSONL files.
+Iterative code generation with LLMs can be viewed as optimization guided by textual feedback. TextBFGS is a **Case-Based Reasoning (CBR)** framework inspired by **Quasi-Newton** methods: instead of stateless first-order search (akin to SGD on text), it maintains a dynamic **Hessian-Proxy Case Base (HPCB)** of historical *error-to-operator* trajectories to approximate **semantic curvature** (an inverse-Hessian role in the discrete space).
 
-Installation
-------------
+- **Retrieve:** query analogous correction patterns by **error/gradient similarity** (not by problem-input similarity), enabling cross-domain transfer of debugging logic.
+- **Reuse / Revise (One-Pass):** a single LLM call produces diagnosis (`<GRADIENT>`), abstract rule (`<OPERATOR>`), and updated code (`<IMPROVED>`), fusing “gradient” and “update” steps.
+- **Retain:** successful `(gradient, operator)` cases are written back into the case base so the optimizer **self-evolves**.
 
-We recommend using Python 3.10+ and a fresh virtual environment:
+The implementation uses **ChromaDB** for embedding-based retrieval (same role as the paper’s case base) and follows the **EvalPlus** protocol for HumanEval / MBPP (**base** vs **plus** pass rates).
+
+## Method (aligned with the paper)
+
+| Idea | Role in code |
+|------|----------------|
+| Textual gradient \(g_t\) as *target problem* | Error feedback from execution / evaluator |
+| \(g_{t-1}\) as query (“semantic momentum”) | Retrieval query for the next step |
+| Top-\(k\) neighbors in embedding space | `Retrieve(M, query=g_{t-1}, k)` |
+| HPCB \(\mathcal{M} = \{(g_i, \mathcal{O}_i)\}\) | Stored trajectories in Chroma (optional code before/after) |
+| Baselines in paper | TextGrad, TextGrad-Momentum, TextBFGS (w/o CB), TextBFGS-REMO (input-similarity retrieval) |
+
+**Privacy / deployment:** this tree is suitable for public release—replace API keys, base URLs, and internal identifiers with your own endpoints before running.
+
+## Experimental setup (from the paper)
+
+- **Backbone:** Qwen3-235B-A22B; **embeddings:** Qwen3-Embedding-8B; **case store:** ChromaDB; **max iterations:** 20 per task; reasoning/thinking disabled for the reported setting; decoding hyperparameters as in the paper.
+- **Benchmarks:** EvalPlus on **HumanEval** and **MBPP**; **hard** subsets retain tasks where the initial Pass@1 attempt scores 0 (**HumanEval-Hard:** 45 tasks; **MBPP-Hard:** 117 tasks).
+- **Metrics:** **Base Pass** (standard tests) and **Plus Pass** (EvalPlus augmented tests).
+
+Bootstrapping the case base (paper) uses **TextBFGS (w/o CB)** over hard subsets (e.g. 3 epochs); stored tuples include pre/post text, gradient, and operator where applicable.
+
+## Repository layout
+
+```text
+TextBFGS/
+├── requirements.txt
+├── README.md
+└── textbfgs/
+    ├── code/
+    │   ├── client.py              # minimal Qwen-compatible chat client
+    │   └── optimizer/             # T-BFGS optimizer, prompts, HPCB / “HPKB” memory
+    ├── examples/
+    │   ├── humaneval_textbfgs.py  # HumanEval / HumanEval+ via EvalPlus
+    │   └── mbpp_textbfgs.py       # MBPP / MBPP+
+    └── data/
+        ├── README.md              # hard subsets & EvalPlus notes
+        ├── generate_humaneval_hard.py
+        ├── generate_mbpp_hard.py
+        ├── humaneval-hard/        # generated JSONL output
+        └── mbpp-hard/
+```
+
+## Installation
+
+Python 3.10+ and a virtual environment are recommended:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-This installs:
-- `textgrad` for textual optimization framework,
-- `evalplus` for HumanEval/MBPP evaluation,
-- `chromadb` for Hessian-Proxy Knowledge Base
+Pulls in **textgrad**, **evalplus**, **chromadb**, and other dependencies listed in `requirements.txt`.
 
-Configuring the language model
-------------------------------
+## Configuring the language model
 
-The scripts require the following parameters (all are mandatory):
+Scripts require (typical flags):
 
-- `--model`: backbone LLM name (used for code generation and optimization)
-- `--base-url`: chat endpoint base URL (the script will append `/chat/completions`)
-- `--api-key`: chat endpoint API key (e.g., `Bearer YOUR_API_KEY_HERE`)
-- `--embedding-api-url`: embedding endpoint URL (for HPKB retrieval)
-- `--embedding-api-key`: embedding endpoint API key
-- `--embedding-api-model`: embedding model name (default: `Qwen3-Embedding-8B`)
+| Parameter | Purpose |
+|-----------|---------|
+| `--model` | Backbone LLM name |
+| `--base-url` | Chat API base URL (often `/chat/completions` appended by client) |
+| `--api-key` | Chat API key (e.g. `Bearer …`) |
+| `--embedding-api-url` | Embedding endpoint for case retrieval |
+| `--embedding-api-key` | Embedding API key |
+| `--embedding-api-model` | Embedding model (paper default: `Qwen3-Embedding-8B`) |
 
-You can use any large language model that supports:
-- chat-style prompts (`messages = [{"role": "system"|"user", ...}]`),
-- streaming responses with `data: ...` JSON lines containing
-  `choices[0].delta.content`.
+The client expects chat APIs with `messages`-style prompts and streaming `data: …` lines exposing `choices[0].delta.content`.
 
-Running TextBFGS on HumanEval/MBPP
-------------------------------
+## Running TextBFGS on HumanEval / MBPP
 
-For instance, from the repository root:
+From the **TextBFGS** repository root:
 
 ```bash
 python textbfgs/examples/humaneval_textbfgs.py \
@@ -71,26 +92,43 @@ python textbfgs/examples/humaneval_textbfgs.py \
   --embedding-api-model "Qwen3-Embedding-8B"
 ```
 
-This will:
-- call the model to produce an initial solution for each HumanEval task,
-- iteratively refine the solution using TextBFGS (T-BFGS optimizer),
-- write per-task results under `<model>_runs/humaneval_t_bfgs_*`,
-- export a JSONL file in `evalplus_results/humaneval/` that can be evaluated
-  with `evalplus.evaluate`.
+Behavior:
 
-Knowledge base (HPKB)
----------------------
+- Generate an initial solution per task, then iterate with **TextBFGS** (T-BFGS optimizer).
+- Write runs under `<model>_runs/humaneval_t_bfgs_*` and EvalPlus-style JSONL under `evalplus_results/humaneval/` for downstream `evalplus.evaluate`.
 
-The Hessian-Proxy Knowledge Base stores successful optimization trajectories:
-textual gradients, abstract operators, and code before/after the fix (optional). The T-BFGS optimizer retrieves similar trajectories to approximate the inverse Hessian of the semantic landscape.
+Adjust `mbpp_textbfgs.py` similarly for MBPP.
 
-Key switches (CLI in both `humaneval_textbfgs.py` and `mbpp_textbfgs.py`):
-- `--kb-mode` (`use-and-store` | `use-only` | `store-only` | `none`)
-  - `use-and-store`: retrieve + persist new traces
-  - `use-only`: retrieve only, no new traces
-  - `store-only`: no retrieval, but store successful traces
-  - `none`: disable HPKB
-- `--include-code-examples`: retrieve/store code before/after.
-- ChromaDB persists under `<model>_runs/.../t_bfgs_kb_global/`.
+## Hessian-Proxy case base (Chroma / “HPKB”)
 
-To enable HPKB in practice, point the embedding URL/key/model to your own service; the defaults are anonymized placeholders.
+The case base stores successful trajectories: textual gradients, abstract operators, and optionally code before/after. Retrieval approximates inverse-Hessian structure by reusing **operators** matched to **error dynamics**.
+
+CLI highlights (see `humaneval_textbfgs.py` / `mbpp_textbfgs.py`):
+
+- `--kb-mode`: `use-and-store` | `use-only` | `store-only` | `none`
+- `--include-code-examples`: include code before/after in retrieve/store
+- Persistence: `<model>_runs/.../t_bfgs_kb_global/`
+
+Point embedding URL, key, and model at your own service; defaults in scripts are placeholders.
+
+## Case study (paper)
+
+On **`HumanEval/127`**, logs show a setting where the initial solution and **TextGrad** remain failing while **TextBFGS** reaches **pass/pass** on base/plus—illustrating recovery from a boundary-sensitive bug (e.g. off-by-one in interval length) via retrieved correction patterns. Full narrative and code excerpts are in the paper’s **Case Study** section (LNCS draft: `ICCBR_2026_LNCS_Template/main.tex` inside the TextEvolve project).
+
+## Citation
+
+If you use this code, please cite the TextBFGS paper (ICCBR 2026 proceedings; BibTeX will match your camera-ready entry). Example:
+
+```bibtex
+@inproceedings{zhang2026textbfgs,
+  title     = {TextBFGS: A Case-Based Reasoning Approach to Code Optimization via Error-Operator Retrieval},
+  author    = {Zhang, Zizheng and others},
+  booktitle = {Proceedings of ICCBR},
+  year      = {2026},
+  note      = {Replace with official publisher metadata when available}
+}
+```
+
+## Keywords (paper)
+
+Case-Based Reasoning · Large Language Models · Code Optimization · Retrieval Augmented Generation · Code Generation
